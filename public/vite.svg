@@ -1,0 +1,43 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bgGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 522) rotate(90) scale(382 360)">
+      <stop offset="0" stop-color="#003DFF" stop-opacity="0.38"/>
+      <stop offset="0.48" stop-color="#001469" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#03030C" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="playStroke" x1="356" y1="316" x2="700" y2="728" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#64FFF1"/>
+      <stop offset="0.52" stop-color="#27E9FF"/>
+      <stop offset="1" stop-color="#73FFF2"/>
+    </linearGradient>
+    <filter id="outerGlow" x="218" y="182" width="618" height="680" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="20" result="blur1"/>
+      <feGaussianBlur stdDeviation="48" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="225" ry="225" fill="#02020B"/>
+  <rect width="1024" height="1024" rx="225" ry="225" fill="url(#bgGlow)"/>
+
+  <path
+    d="M358 321 L358 718 L694 519 Z"
+    stroke="#007BFF"
+    stroke-width="26"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+    filter="url(#outerGlow)"
+    opacity="0.95"
+  />
+  <path
+    d="M358 321 L358 718 L694 519 Z"
+    stroke="url(#playStroke)"
+    stroke-width="20"
+    stroke-linejoin="round"
+    stroke-linecap="round"
+  />
+</svg>

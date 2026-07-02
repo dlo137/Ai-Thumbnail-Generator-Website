@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+  .glass-panel {
+    background: rgba(49, 53, 59, 0.6);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+}
+
+@layer base {
+  body {
+    margin: 0;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 100%;
+    text-align: left;
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Full Material Symbols class definition — ligatures require all of these */
+  .material-symbols-outlined {
+    font-family: 'Material Symbols Outlined';
+    font-weight: normal;
+    font-style: normal;
+    font-size: 24px;
+    line-height: 1;
+    letter-spacing: normal;
+    text-transform: none;
+    display: inline-block;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    -webkit-font-feature-settings: 'liga';
+    font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #03060a;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1c2028;
+    border-radius: 10px;
+  }
+}
