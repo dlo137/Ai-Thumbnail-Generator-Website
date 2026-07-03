@@ -14,6 +14,10 @@ dist
 dist-ssr
 *.local
 
+# Local-only secrets/utilities — never commit
+*.p8
+generate-apple-secret.cjs
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

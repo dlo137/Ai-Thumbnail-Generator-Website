@@ -64,6 +64,25 @@ export default {
         body: ["Inter", "sans-serif"],
         label: ["Inter", "sans-serif"],
       },
+      keyframes: {
+        float: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-16px)" },
+        },
+        "fade-in-up": {
+          "0%": { opacity: "0", transform: "translateY(16px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        marquee: {
+          "0%": { transform: "translateX(0)" },
+          "100%": { transform: "translateX(-50%)" },
+        },
+      },
+      animation: {
+        float: "float 6s ease-in-out infinite",
+        "fade-in-up": "fade-in-up 0.7s ease-out both",
+        marquee: "marquee 110s linear infinite",
+      },
     },
   },
   plugins: [],

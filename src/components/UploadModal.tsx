@@ -1,14 +1,20 @@
 import { useRef, useState } from 'react';
+import { uploadReferenceImage } from '../services/generationService';
 
 interface UploadModalProps {
   type: 'subject' | 'reference';
-  onConfirm: (file: File) => void;
+  /** Called with the uploaded image's URL once the upload succeeds — the
+   *  modal owns the upload itself (matching the mobile app's Subject/Reference
+   *  modals) so callers only ever deal in ready-to-use URLs. */
+  onConfirm: (url: string) => void;
   onCancel: () => void;
 }
 
 export default function UploadModal({ type, onConfirm, onCancel }: UploadModalProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isSubject = type === 'subject';
@@ -21,12 +27,27 @@ export default function UploadModal({ type, onConfirm, onCancel }: UploadModalPr
   function handleFile(f: File) {
     setFile(f);
     setPreview(URL.createObjectURL(f));
+    setUploadError(null);
   }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     const f = e.dataTransfer.files[0];
     if (f && f.type.startsWith('image/')) handleFile(f);
+  }
+
+  async function handleConfirm() {
+    if (!file || isUploading) return;
+    setIsUploading(true);
+    setUploadError(null);
+    try {
+      const url = await uploadReferenceImage(file, type);
+      onConfirm(url);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
   }
 
   return (
@@ -64,20 +85,30 @@ export default function UploadModal({ type, onConfirm, onCancel }: UploadModalPr
           onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
         />
 
+        {uploadError && <p className="text-xs text-error font-medium">{uploadError}</p>}
+
         {/* Actions */}
         <div className="flex gap-3">
           <button
             onClick={onCancel}
-            className="flex-1 py-2.5 rounded-xl border border-outline-variant/30 text-sm font-bold text-on-surface-variant hover:bg-surface-container transition-all"
+            disabled={isUploading}
+            className="flex-1 py-2.5 rounded-xl border border-outline-variant/30 text-sm font-bold text-on-surface-variant hover:bg-surface-container transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
-            onClick={() => file && onConfirm(file)}
-            disabled={!file}
-            className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-primary text-on-primary font-bold text-sm hover:shadow-[0_0_20px_rgba(29,78,216,0.5)] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={handleConfirm}
+            disabled={!file || isUploading}
+            className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-primary-container to-primary text-on-primary font-bold text-sm hover:shadow-[0_0_20px_rgba(29,78,216,0.5)] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {confirmLabel}
+            {isUploading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-on-primary/40 border-t-on-primary rounded-full animate-spin" />
+                Uploading…
+              </>
+            ) : (
+              confirmLabel
+            )}
           </button>
         </div>
       </div>

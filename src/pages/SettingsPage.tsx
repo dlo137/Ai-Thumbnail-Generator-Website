@@ -1,4 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { useCredits } from '../contexts/CreditsContext';
 
 interface SupportForm {
   name: string;
@@ -7,8 +10,66 @@ interface SupportForm {
   message: string;
 }
 
+const PLAN_LABELS: Record<string, string> = {
+  weekly: 'Weekly Professional',
+  monthly: 'Monthly Professional',
+  yearly: 'Yearly Professional',
+};
+
+const PLAN_CYCLE_DAYS: Record<string, number> = {
+  weekly: 7,
+  monthly: 30,
+  yearly: 30, // credits reset monthly even on the yearly plan, per manage-credits
+};
+
+function formatDate(iso: string | null): string | null {
+  if (!iso) return null;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function getNextResetDate(plan: string | null, lastReset: string | null, subscriptionStart: string | null): string | null {
+  if (!plan || !PLAN_CYCLE_DAYS[plan]) return null;
+  const anchor = lastReset ?? subscriptionStart;
+  if (!anchor) return null;
+  const next = new Date(anchor);
+  next.setDate(next.getDate() + PLAN_CYCLE_DAYS[plan]);
+  return formatDate(next.toISOString());
+}
+
 export default function SettingsPage() {
+  const navigate = useNavigate();
+  const { user, profile, signOut, deleteAccount } = useAuth();
+  const { current: creditsCurrent, max: creditsMax, loading: creditsLoading } = useCredits();
   const [support, setSupport] = useState<SupportForm>({ name: '', email: '', subject: '', message: '' });
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
+
+  async function handleSignOut() {
+    setAccountError(null);
+    setIsSigningOut(true);
+    try {
+      await signOut();
+      navigate('/', { replace: true });
+    } catch (err) {
+      setAccountError(err instanceof Error ? err.message : 'Failed to sign out. Please try again.');
+      setIsSigningOut(false);
+    }
+  }
+
+  async function handleDeleteAccount() {
+    setAccountError(null);
+    setIsDeleting(true);
+    try {
+      await deleteAccount();
+      navigate('/', { replace: true });
+    } catch (err) {
+      setAccountError(err instanceof Error ? err.message : 'Failed to delete account. Please try again.');
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  }
 
   function handleSupportChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
     setSupport((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -20,9 +81,28 @@ export default function SettingsPage() {
     console.log('Support message:', support);
   }
 
-  const CREDITS_USED = 120;
-  const CREDITS_TOTAL = 1000;
-  const creditsPercent = Math.round((CREDITS_USED / CREDITS_TOTAL) * 100);
+  const displayName = profile?.name || user?.email?.split('@')[0] || 'Creator';
+  const displayEmail = profile?.email || user?.email || '';
+  const avatarLetter = displayName.charAt(0).toUpperCase() || '?';
+
+  const planKey = profile?.subscription_plan ?? null;
+  const isPro = profile?.is_pro_version ?? false;
+  const isTrial = profile?.is_trial_version ?? false;
+  const planLabel = isPro && planKey ? PLAN_LABELS[planKey] ?? `${planKey} Professional` : 'Free Plan';
+  const badgeLabel = isTrial ? 'Trial' : isPro ? 'Pro Creator' : 'Free Plan';
+  const activeSince = formatDate(profile?.subscription_start_date ?? null);
+  const nextBilling = getNextResetDate(planKey, profile?.last_credit_reset ?? null, profile?.subscription_start_date ?? null);
+  const trialEnds = formatDate(profile?.trial_end_date ?? null);
+
+  const creditsPercent = creditsMax > 0 ? Math.round(((creditsMax - creditsCurrent) / creditsMax) * 100) : 0;
+
+  useEffect(() => {
+    setSupport((prev) => ({
+      ...prev,
+      name: prev.name || profile?.name || '',
+      email: prev.email || displayEmail,
+    }));
+  }, [profile, displayEmail]);
 
   return (
     <main className="pt-16 min-h-screen bg-surface overflow-y-auto relative">
@@ -47,15 +127,15 @@ export default function SettingsPage() {
             <div className="bg-surface-container-low rounded-xl p-8 flex flex-col items-center text-center gap-4 relative overflow-hidden">
               <div className="absolute top-0 right-0 p-4">
                 <span className="bg-primary/10 text-primary px-3 py-1 rounded-full text-[10px] font-bold tracking-widest uppercase">
-                  Pro Creator
+                  {badgeLabel}
                 </span>
               </div>
               <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary text-4xl font-extrabold shadow-lg">
-                G
+                {avatarLetter}
               </div>
               <div className="flex flex-col gap-1">
-                <h2 className="font-headline text-xl font-bold">Guest User</h2>
-                <p className="text-sm text-outline">creator@digitaldarkroom.io</p>
+                <h2 className="font-headline text-xl font-bold">{displayName}</h2>
+                <p className="text-sm text-outline">{displayEmail}</p>
               </div>
               <button className="mt-2 w-full py-3 bg-surface-container-highest hover:bg-surface-bright transition-colors rounded-full text-sm font-bold border border-outline-variant/10">
                 Edit Profile
@@ -65,7 +145,7 @@ export default function SettingsPage() {
             {/* Credits overview */}
             <div className="bg-surface-container-low rounded-xl p-8 flex flex-col gap-6">
               <div className="flex justify-between items-center">
-                <h3 className="font-headline text-sm font-bold tracking-tight opacity-60">Credits Usage</h3>
+                <h3 className="font-headline text-sm font-bold tracking-tight opacity-60">Credits Remaining</h3>
                 <span
                   className="material-symbols-outlined text-tertiary"
                   style={{ fontVariationSettings: "'FILL' 1" }}
@@ -73,23 +153,29 @@ export default function SettingsPage() {
                   bolt
                 </span>
               </div>
-              <div className="flex flex-col gap-2">
-                <div className="flex justify-between items-end">
-                  <span className="text-3xl font-headline font-extrabold">
-                    {CREDITS_USED}{' '}
-                    <span className="text-sm font-normal text-outline">/ {CREDITS_TOTAL.toLocaleString()}</span>
-                  </span>
-                  <span className="text-xs font-bold text-primary">{creditsPercent}% Used</span>
+              {creditsLoading ? (
+                <div className="h-12 rounded-lg bg-surface-container-highest animate-pulse" />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="flex justify-between items-end">
+                    <span className="text-3xl font-headline font-extrabold">
+                      {creditsCurrent}{' '}
+                      <span className="text-sm font-normal text-outline">/ {creditsMax.toLocaleString()}</span>
+                    </span>
+                    <span className="text-xs font-bold text-primary">{creditsPercent}% Used</span>
+                  </div>
+                  <div className="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-primary to-tertiary rounded-full"
+                      style={{ width: `${creditsPercent}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-2 bg-surface-container-highest rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-primary to-tertiary rounded-full"
-                    style={{ width: `${creditsPercent}%` }}
-                  />
-                </div>
-              </div>
+              )}
               <p className="text-xs text-outline leading-relaxed italic">
-                Credits reset on October 24th, 2023. Unused credits do not roll over.
+                {nextBilling
+                  ? `Credits reset on ${nextBilling}. Unused credits do not roll over.`
+                  : 'Upgrade to a plan to get recurring credits.'}
               </p>
             </div>
           </div>
@@ -109,21 +195,33 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <h3 className="font-headline text-lg font-bold">Subscription Plan</h3>
-                  <p className="text-sm text-outline">Active since Jan 2023</p>
+                  <p className="text-sm text-outline">{activeSince ? `Active since ${activeSince}` : 'No active subscription'}</p>
                 </div>
               </div>
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 p-6 bg-surface-container-low rounded-xl">
                 <div>
                   <p className="text-xs font-bold text-tertiary tracking-widest uppercase mb-1">Current Plan</p>
-                  <p className="text-xl font-bold font-headline">Yearly Professional</p>
-                  <p className="text-sm text-outline mt-1">$59.99/year • Next billing: Oct 24, 2023</p>
+                  <p className="text-xl font-bold font-headline">{planLabel}</p>
+                  <p className="text-sm text-outline mt-1">
+                    {[
+                      profile?.price != null ? `$${profile.price}` : null,
+                      isTrial && trialEnds ? `Trial ends ${trialEnds}` : nextBilling ? `Next reset: ${nextBilling}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' • ') || 'No billing information yet'}
+                  </p>
                 </div>
                 <div className="flex gap-3">
-                  <button className="px-6 py-2 rounded-full border border-outline-variant/30 text-sm font-bold hover:bg-surface-container-highest transition-all">
-                    Cancel
-                  </button>
-                  <button className="px-6 py-2 rounded-full bg-primary-container text-on-primary-container text-sm font-bold hover:brightness-110 active:scale-95 transition-all">
-                    Upgrade Plan
+                  {isPro && (
+                    <button className="px-6 py-2 rounded-full border border-outline-variant/30 text-sm font-bold hover:bg-surface-container-highest transition-all">
+                      Cancel
+                    </button>
+                  )}
+                  <button
+                    onClick={() => navigate('/pricing')}
+                    className="px-6 py-2 rounded-full bg-primary-container text-on-primary-container text-sm font-bold hover:brightness-110 active:scale-95 transition-all"
+                  >
+                    {isPro ? 'Change Plan' : 'Upgrade Plan'}
                   </button>
                 </div>
               </div>
@@ -208,15 +306,24 @@ export default function SettingsPage() {
                 <h3 className="font-headline text-lg font-bold">Danger Zone</h3>
               </div>
               <div className="flex flex-wrap gap-4">
-                <button className="px-8 py-3 rounded-full bg-surface-container-highest text-on-surface text-sm font-bold hover:bg-surface-bright transition-all flex items-center gap-2">
+                <button
+                  onClick={handleSignOut}
+                  disabled={isSigningOut}
+                  className="px-8 py-3 rounded-full bg-surface-container-highest text-on-surface text-sm font-bold hover:bg-surface-bright transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <span className="material-symbols-outlined text-sm">logout</span>
-                  Sign Out
+                  {isSigningOut ? 'Signing Out…' : 'Sign Out'}
                 </button>
-                <button className="px-8 py-3 rounded-full border border-error/30 text-error text-sm font-bold hover:bg-error hover:text-on-error transition-all flex items-center gap-2">
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  disabled={isDeleting}
+                  className="px-8 py-3 rounded-full border border-error/30 text-error text-sm font-bold hover:bg-error hover:text-on-error transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                   <span className="material-symbols-outlined text-sm">delete_forever</span>
                   Delete Account
                 </button>
               </div>
+              {accountError && <p className="text-xs text-error">{accountError}</p>}
               <p className="text-xs text-outline italic">
                 Deleting your account is permanent. All generated assets, history, and training data will be erased
                 from our servers immediately.
@@ -225,6 +332,36 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-error/20 rounded-3xl p-6 w-full max-w-sm shadow-2xl flex flex-col gap-5">
+            <div>
+              <h2 className="font-headline font-bold text-lg text-on-surface">Delete your account?</h2>
+              <p className="text-xs text-on-surface-variant mt-1">
+                This is permanent. All generated assets, history, credits, and subscription data will be erased
+                immediately and cannot be recovered.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 rounded-xl border border-outline-variant/30 text-sm font-bold text-on-surface-variant hover:bg-surface-container transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={isDeleting}
+                className="flex-1 py-2.5 rounded-xl bg-error text-on-error font-bold text-sm hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDeleting ? 'Deleting…' : 'Delete Permanently'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

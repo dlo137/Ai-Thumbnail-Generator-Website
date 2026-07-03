@@ -9,9 +9,11 @@ const navItems = [
 
 interface NavBarProps {
   showSearch?: boolean;
+  searchQuery?: string;
+  onSearchChange?: (value: string) => void;
 }
 
-export default function NavBar({ showSearch = false }: NavBarProps) {
+export default function NavBar({ showSearch = false, searchQuery = '', onSearchChange }: NavBarProps) {
   const { pathname } = useLocation();
   const isSettings = pathname === '/settings';
 
@@ -53,6 +55,8 @@ export default function NavBar({ showSearch = false }: NavBarProps) {
               className="bg-surface-container-lowest border-none rounded-full py-1.5 pl-10 pr-4 text-[10px] tracking-widest font-bold focus:outline-none focus:ring-1 focus:ring-primary/50 w-64 text-on-surface placeholder:text-outline/50"
               placeholder="SEARCH PROJECTS..."
               type="text"
+              value={searchQuery}
+              onChange={(e) => onSearchChange?.(e.target.value)}
             />
           </div>
         ) : null}

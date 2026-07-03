@@ -5,11 +5,26 @@ const ratios = ['16:9', '9:16', '1:1', '4:3', '4:5', '3:2', '21:9'];
 const batchOptions = [1, 2, 3, 4, 6];
 
 interface PromptBarProps {
-  onGenerate: (prompt: string, batchCount: number, imageBase64?: string) => void;
+  onGenerate: (
+    prompt: string,
+    batchCount: number,
+    aspectRatio: string,
+    imageBase64?: string,
+    subjectImageUrl?: string,
+    referenceImageUrl?: string
+  ) => void;
   isLoading: boolean;
+  /** When true, renders vertically centered in the viewport instead of docked to the
+   *  bottom. Animates smoothly between the two via `top`/`transform` so callers can
+   *  toggle it (e.g. "load in centered, then transition to bottom"). */
+  centered?: boolean;
+  /** When true (e.g. while focused on a single thumbnail in editing mode), hides
+   *  the Subject/Reference/batch-count/aspect-ratio row and keeps just the text
+   *  input and Generate button. */
+  simplified?: boolean;
 }
 
-export default function PromptBar({ onGenerate, isLoading }: PromptBarProps) {
+export default function PromptBar({ onGenerate, isLoading, centered = false, simplified = false }: PromptBarProps) {
   const [prompt, setPrompt] = useState('');
   const [batchCount, setBatchCount] = useState(3);
   const [showBatchMenu, setShowBatchMenu] = useState(false);
@@ -18,8 +33,8 @@ export default function PromptBar({ onGenerate, isLoading }: PromptBarProps) {
   const [showRatioMenu, setShowRatioMenu] = useState(false);
   const ratioRef = useRef<HTMLDivElement>(null);
   const [uploadModal, setUploadModal] = useState<'subject' | 'reference' | null>(null);
-  const [subjectFile, setSubjectFile] = useState<File | null>(null);
-  const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const [subjectImageUrl, setSubjectImageUrl] = useState<string | null>(null);
+  const [referenceImageUrl, setReferenceImageUrl] = useState<string | null>(null);
   const [quickImage, setQuickImage] = useState<{ file: File; preview: string } | null>(null);
   const quickInputRef = useRef<HTMLInputElement>(null);
 
@@ -29,27 +44,46 @@ export default function PromptBar({ onGenerate, isLoading }: PromptBarProps) {
 
   async function handleGenerate() {
     if (!prompt.trim() || isLoading) return;
+    const trimmedPrompt = prompt.trim();
+
     if (quickImage) {
       const base64 = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve((reader.result as string).split(',')[1]);
         reader.readAsDataURL(quickImage.file);
       });
-      onGenerate(prompt.trim(), batchCount, base64);
+      onGenerate(trimmedPrompt, batchCount, selectedRatio, base64, subjectImageUrl ?? undefined, referenceImageUrl ?? undefined);
     } else {
-      onGenerate(prompt.trim(), batchCount);
+      onGenerate(trimmedPrompt, batchCount, selectedRatio, undefined, subjectImageUrl ?? undefined, referenceImageUrl ?? undefined);
     }
+
+    // Clear the bar back to a blank slate once the prompt's been handed off —
+    // batchCount/selectedRatio are sticky settings, not part of "what was
+    // typed", so those are left alone.
+    setPrompt('');
+    setQuickImage(null);
+    setSubjectImageUrl(null);
+    setReferenceImageUrl(null);
   }
 
   return (
     <>
-    <div className="fixed bottom-0 right-0 left-0 pb-8 px-10 pointer-events-none">
+    <div
+      className="fixed left-0 right-0 px-10 pointer-events-none transition-[top,transform] duration-700 ease-out"
+      style={
+        centered
+          ? { top: '50%', transform: 'translateY(-50%)' }
+          : { top: '100%', transform: 'translateY(calc(-100% - 2rem))' }
+      }
+    >
       <div className="max-w-[68.5rem] mx-auto w-full pointer-events-auto">
         {/* Prompt input */}
         <div className="bg-gradient-to-r from-zinc-950 to-zinc-800 border border-outline-variant/20 rounded-3xl p-2 flex items-stretch gap-2 shadow-2xl">
           {/* Left: text input + ratio row */}
           <div className="flex-1 flex flex-col px-4 py-3 gap-3.5">
             <div className="flex items-center gap-2">
+              {!simplified && (
+              <>
               <button
                 onClick={() => quickInputRef.current?.click()}
                 className="relative shrink-0 hover:scale-110 transition-transform"
@@ -76,29 +110,32 @@ export default function PromptBar({ onGenerate, isLoading }: PromptBarProps) {
                 className="hidden"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) handleQuickUpload(f); e.target.value = ''; }}
               />
+              </>
+              )}
               <input
                 className="flex-1 bg-transparent border-none outline-none focus:ring-0 text-on-surface placeholder:text-on-surface-variant/50 text-sm font-medium disabled:opacity-50"
-                placeholder="Describe the visual story for your thumbnail..."
+                placeholder={simplified ? 'Describe what you want to change...' : 'Describe the visual story for your thumbnail...'}
                 value={prompt}
                 disabled={isLoading}
                 onChange={(e) => setPrompt(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
               />
             </div>
+            {!simplified && (
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => setUploadModal('subject')}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md border text-xs font-bold transition-all bg-zinc-800 ${subjectFile ? 'border-primary/50 text-primary' : 'border-outline-variant/20 text-on-surface-variant hover:border-primary/40 hover:text-primary'}`}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md border text-xs font-bold transition-all bg-zinc-800 ${subjectImageUrl ? 'border-primary/50 text-primary' : 'border-outline-variant/20 text-on-surface-variant hover:border-primary/40 hover:text-primary'}`}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>person</span>
-                {subjectFile ? 'Subject ✓' : 'Subject'}
+                {subjectImageUrl ? 'Subject ✓' : 'Subject'}
               </button>
               <button
                 onClick={() => setUploadModal('reference')}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md border text-xs font-bold transition-all bg-zinc-800 ${referenceFile ? 'border-primary/50 text-primary' : 'border-outline-variant/20 text-on-surface-variant hover:border-primary/40 hover:text-primary'}`}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md border text-xs font-bold transition-all bg-zinc-800 ${referenceImageUrl ? 'border-primary/50 text-primary' : 'border-outline-variant/20 text-on-surface-variant hover:border-primary/40 hover:text-primary'}`}
               >
                 <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>image</span>
-                {referenceFile ? 'Reference ✓' : 'Reference'}
+                {referenceImageUrl ? 'Reference ✓' : 'Reference'}
               </button>
               <span className="w-px h-4 bg-outline-variant/40 mx-0.5" />
               <div ref={batchRef} className="relative">
@@ -155,6 +192,7 @@ export default function PromptBar({ onGenerate, isLoading }: PromptBarProps) {
                 )}
               </div>
             </div>
+            )}
           </div>
 
           {/* Generate button — full height */}
@@ -183,9 +221,9 @@ export default function PromptBar({ onGenerate, isLoading }: PromptBarProps) {
       <UploadModal
         type={uploadModal}
         onCancel={() => setUploadModal(null)}
-        onConfirm={(file) => {
-          if (uploadModal === 'subject') setSubjectFile(file);
-          else setReferenceFile(file);
+        onConfirm={(url) => {
+          if (uploadModal === 'subject') setSubjectImageUrl(url);
+          else setReferenceImageUrl(url);
           setUploadModal(null);
         }}
       />
