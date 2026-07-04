@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import { useGenerationHistory } from '../contexts/GenerationHistoryContext';
 import { useToast } from '../contexts/ToastContext';
 import { downloadImage } from '../utils/imageUtils';
@@ -30,6 +31,7 @@ interface HistoryItem {
 
 function HistoryCard({
   item,
+  locked,
   onToggleFavorite,
   onDelete,
   onEdit,
@@ -37,6 +39,11 @@ function HistoryCard({
   onShare,
 }: {
   item: HistoryItem;
+  /** No active subscription — blur the thumbnail and hide every action
+   *  (edit/download/save/share/delete) behind a lock overlay, matching the
+   *  home page's teaser treatment. Nothing about a past generation is usable
+   *  until the user subscribes. */
+  locked: boolean;
   onToggleFavorite: (id: string) => void;
   onDelete: (id: string) => void;
   onEdit: (imageUrl: string) => void;
@@ -47,61 +54,77 @@ function HistoryCard({
     <div className="group relative bg-[#151a21] rounded-lg overflow-hidden transition-all duration-300 hover:-translate-y-1 border border-[#232932] shadow-[0_10px_40px_rgba(0,0,0,0.3)]">
       <div className="aspect-video relative overflow-hidden">
         <img
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+          className={`w-full h-full object-cover transition-transform duration-700 ${
+            locked ? 'blur-2xl scale-110' : 'group-hover:scale-105'
+          }`}
           src={item.image}
           alt={item.title}
         />
 
-        {item.favorited && (
-          <div className="absolute top-4 right-4 z-10">
-            <div className="bg-tertiary/20 backdrop-blur-md p-2 rounded-full shadow-[0_0_15px_rgba(249,189,34,0.3)] border border-tertiary/30">
-              <span
-                className="material-symbols-outlined text-tertiary text-sm"
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                star
-              </span>
-            </div>
-          </div>
-        )}
-
-        <div className="absolute inset-0 bg-background/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
-          <button
-            onClick={() => onEdit(item.image)}
-            title="Focus and edit this thumbnail"
-            className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all active:scale-90"
-          >
-            <span className="material-symbols-outlined text-lg">add</span>
-          </button>
-          <button
-            onClick={onDownload}
-            className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all active:scale-90"
-          >
-            <span className="material-symbols-outlined text-lg">download</span>
-          </button>
-          {!item.favorited && (
-            <button
-              onClick={() => onToggleFavorite(item.id)}
-              className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center hover:bg-tertiary hover:text-on-tertiary transition-all active:scale-90"
+        {locked ? (
+          <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2 text-center px-4">
+            <span className="material-symbols-outlined text-3xl text-on-surface drop-shadow-lg">lock</span>
+            <Link
+              to="/pricing"
+              className="text-xs font-bold text-on-surface bg-primary px-3 py-1.5 rounded-full hover:brightness-110 transition-all"
             >
-              <span className="material-symbols-outlined text-lg" style={{ fontVariationSettings: "'FILL' 0" }}>
-                favorite
-              </span>
-            </button>
-          )}
-          <button
-            onClick={onShare}
-            className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all active:scale-90"
-          >
-            <span className="material-symbols-outlined text-lg">share</span>
-          </button>
-          <button
-            onClick={() => onDelete(item.id)}
-            className="w-10 h-10 rounded-full bg-error-container text-on-error-container flex items-center justify-center hover:bg-error hover:text-on-error transition-all active:scale-90"
-          >
-            <span className="material-symbols-outlined text-lg">delete</span>
-          </button>
-        </div>
+              Subscribe to unlock
+            </Link>
+          </div>
+        ) : (
+          <>
+            {item.favorited && (
+              <div className="absolute top-4 right-4 z-10">
+                <div className="bg-tertiary/20 backdrop-blur-md p-2 rounded-full shadow-[0_0_15px_rgba(249,189,34,0.3)] border border-tertiary/30">
+                  <span
+                    className="material-symbols-outlined text-tertiary text-sm"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    star
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="absolute inset-0 bg-background/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-4">
+              <button
+                onClick={() => onEdit(item.image)}
+                title="Focus and edit this thumbnail"
+                className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all active:scale-90"
+              >
+                <span className="material-symbols-outlined text-lg">add</span>
+              </button>
+              <button
+                onClick={onDownload}
+                className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all active:scale-90"
+              >
+                <span className="material-symbols-outlined text-lg">download</span>
+              </button>
+              {!item.favorited && (
+                <button
+                  onClick={() => onToggleFavorite(item.id)}
+                  className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center hover:bg-tertiary hover:text-on-tertiary transition-all active:scale-90"
+                >
+                  <span className="material-symbols-outlined text-lg" style={{ fontVariationSettings: "'FILL' 0" }}>
+                    favorite
+                  </span>
+                </button>
+              )}
+              <button
+                onClick={onShare}
+                className="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center hover:bg-primary hover:text-on-primary transition-all active:scale-90"
+              >
+                <span className="material-symbols-outlined text-lg">share</span>
+              </button>
+              <button
+                onClick={() => onDelete(item.id)}
+                className="w-10 h-10 rounded-full bg-error-container text-on-error-container flex items-center justify-center hover:bg-error hover:text-on-error transition-all active:scale-90"
+              >
+                <span className="material-symbols-outlined text-lg">delete</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="p-6">
@@ -133,6 +156,12 @@ interface HistoryPageProps {
 
 export default function HistoryPage({ onEditThumbnail, searchQuery = '' }: HistoryPageProps) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  // No active subscription — every card blurs and hides its actions behind
+  // a lock overlay, same as the home page's teaser. `profile` is null before
+  // it loads or for the no-real-session dev bypass, and both should fail
+  // closed (locked) rather than briefly flashing unlocked content.
+  const isLocked = !profile?.is_pro_version;
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   // Every generated thumbnail (full batch or a single edit) shows up here
   // automatically via GenerationHistoryContext — "Saved" is just the
@@ -236,6 +265,7 @@ export default function HistoryPage({ onEditThumbnail, searchQuery = '' }: Histo
             <HistoryCard
               key={item.id}
               item={item}
+              locked={isLocked}
               onToggleFavorite={toggleFavorite}
               onDelete={deleteItem}
               onEdit={onEditThumbnail}

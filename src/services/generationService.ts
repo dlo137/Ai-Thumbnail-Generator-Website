@@ -63,10 +63,27 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// supabase-js's FunctionsHttpError.message is a generic "non-2xx status code"
+// string — the edge function's actual JSON body (e.g. our worded "Insufficient
+// credits..." message) only lives on error.context, the raw Response. Read
+// that first so callers see the real message instead of a generic one.
+async function extractErrorMessage(error: { message: string; context?: Response }): Promise<string> {
+  if (error.context) {
+    try {
+      const body = await error.context.clone().json();
+      if (typeof body?.error === 'string') return body.error;
+    } catch {
+      // fall through to the generic message below
+    }
+  }
+  return error.message;
+}
+
 // Mirrors the mobile app's retry loop (handleGenerate/handleModalGenerate in
 // generate.tsx) — a single flaky Gemini response (safety filter, transient
 // hiccup) shouldn't surface as a hard error immediately; retry once after a
-// short delay before giving up.
+// short delay before giving up. A 402 insufficient-credits response is not
+// transient (retrying won't add credits), so it fails fast instead.
 async function invokeGenerateThumbnail(body: Record<string, unknown>) {
   let lastError: Error = new Error('Unknown error');
 
@@ -77,7 +94,11 @@ async function invokeGenerateThumbnail(body: Record<string, unknown>) {
       return data;
     }
 
-    lastError = error ? new Error(error.message) : new Error(data.error);
+    if (error?.context?.status === 402) {
+      throw new Error(await extractErrorMessage(error));
+    }
+
+    lastError = error ? new Error(await extractErrorMessage(error)) : new Error(data.error);
     if (attempt < MAX_ATTEMPTS) {
       await delay(RETRY_DELAY_MS);
     }

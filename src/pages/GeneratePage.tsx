@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useCredits } from '../contexts/CreditsContext';
-import { generateThumbnails, generateTitle, deductCredits } from '../services/generationService';
+import { generateThumbnails, generateTitle } from '../services/generationService';
 import GeneratedThumbnailCard from '../components/GeneratedThumbnailCard';
 
 const MIN_CREDITS = 3;
@@ -22,7 +22,7 @@ interface Results {
 }
 
 export default function GeneratePage() {
-  const { current: credits, loading: creditsLoading, refreshCredits } = useCredits();
+  const { current: credits, loading: creditsLoading } = useCredits();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [prompt, setPrompt] = useState(() => searchParams.get('prompt') ?? '');

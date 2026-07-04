@@ -254,7 +254,7 @@ export default function PricingPage({
 
       if (!session) {
         sessionStorage.setItem(PENDING_PLAN_KEY, plan.id);
-        navigate('/login');
+        navigate('/signup');
         return;
       }
 

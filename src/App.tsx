@@ -25,12 +25,17 @@ function AppShell() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { addToHistory } = useGenerationHistory();
-  const { refreshCredits } = useCredits();
+  const { current: creditsCurrent, refreshCredits } = useCredits();
   const { showToast } = useToast();
+  const { profile, refreshProfile } = useAuth();
   const [genStatus, setGenStatus] = useState<GenStatus>('idle');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [genError, setGenError] = useState<string | null>(null);
   const [isTeaserResult, setIsTeaserResult] = useState(false);
+  // Dev-only escape hatch for PricingPage's "Simulate unlock" button — lets a
+  // developer preview the unlocked HomePage/History state without an actual
+  // subscription, overriding the real subscription-based lock below.
+  const [devUnlocked, setDevUnlocked] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -50,6 +55,14 @@ function AppShell() {
   const showPromptBar = PROMPT_BAR_ROUTES.includes(pathname);
   const showSearch = pathname === '/history';
   const isEditingThumbnail = pathname === '/' && editingIndex !== null;
+  // Locked whenever there's no active subscription — not just during the
+  // one-off free/dev-bypass teaser flow. `profile` is null before it loads
+  // or for the no-real-session dev bypass, and both fail closed (locked).
+  // `isTeaserResult` still forces locked too (covers the instant it's true
+  // but profile hasn't caught up yet); `devUnlocked` is the one deliberate
+  // override, for previewing the unlocked state without a real purchase.
+  const isSubscribed = profile?.is_pro_version ?? false;
+  const showLocked = (isTeaserResult || !isSubscribed) && !devUnlocked;
 
   async function handleGenerate(
     prompt: string,
@@ -57,7 +70,12 @@ function AppShell() {
     aspectRatio: string,
     imageBase64?: string,
     subjectImageUrl?: string,
-    referenceImageUrl?: string
+    referenceImageUrl?: string,
+    // The mount-effect's free/teaser generation (below) fires before the
+    // credits context has necessarily finished its first load, so it opts out
+    // of this client-side check — the edge function's own server-side gate is
+    // still the real enforcement either way, this is just for fast UX.
+    skipCreditCheck = false
   ) {
     // Focused on a single thumbnail: edit that exact image in place rather than
     // kicking off a whole new batch (or an unrelated new image). Mirrors the
@@ -65,6 +83,10 @@ function AppShell() {
     // adjustmentMode: true, which is what actually routes the edge function
     // into its image-edit path instead of generating something new.
     if (editingIndex !== null) {
+      if (!skipCreditCheck && creditsCurrent < 1) {
+        setEditError('Insufficient credits. You need at least 1 credit to edit a thumbnail.');
+        return;
+      }
       setEditLoading(true);
       setEditError(null);
       try {
@@ -78,6 +100,14 @@ function AppShell() {
       } finally {
         setEditLoading(false);
       }
+      return;
+    }
+
+    if (!skipCreditCheck && creditsCurrent < batchCount) {
+      setGenError(
+        `Insufficient credits. This batch needs ${batchCount} credit${batchCount > 1 ? 's' : ''}, but you only have ${creditsCurrent}.`
+      );
+      setGenStatus('error');
       return;
     }
 
@@ -128,7 +158,7 @@ function AppShell() {
     if (pendingPrompt) {
       sessionStorage.removeItem('pending_prompt');
       setIsTeaserResult(true);
-      handleGenerate(pendingPrompt, 1, '16:9');
+      handleGenerate(pendingPrompt, 1, '16:9', undefined, undefined, undefined, true);
       return;
     }
 
@@ -167,17 +197,21 @@ function AppShell() {
 
   // Stripe Checkout's success_url lands back on `/?checkout=success` — unlock
   // whatever teaser thumbnail was already showing (the whole point of
-  // subscribing was to reveal it), refresh the credits the webhook just
-  // granted, and strip the query param so it doesn't re-fire on a reload.
+  // subscribing was to reveal it), refresh credits AND profile (is_pro_version
+  // is what showLocked actually keys off of — without refreshing it here,
+  // the client's stale "not subscribed" profile would keep everything locked
+  // even though the webhook already flipped it in the database), and strip
+  // the query param so it doesn't re-fire on a reload.
   useEffect(() => {
     if (pathname === '/' && searchParams.get('checkout') === 'success') {
       setIsTeaserResult(false);
       sessionStorage.removeItem('teaser_thumbnail');
       refreshCredits();
+      refreshProfile();
       showToast('Subscription active! Your thumbnail is unlocked.');
       setSearchParams({}, { replace: true });
     }
-  }, [pathname, searchParams, refreshCredits, showToast, setSearchParams]);
+  }, [pathname, searchParams, refreshCredits, refreshProfile, showToast, setSearchParams]);
 
   function handleEdit(index: number) {
     setEditError(null);
@@ -221,7 +255,7 @@ function AppShell() {
               pendingBatchCount={pendingBatchCount}
               pendingAspectRatio={pendingAspectRatio}
               pendingGenPrompt={pendingGenPrompt}
-              isTeaser={isTeaserResult}
+              isTeaser={showLocked}
               editingIndex={editingIndex}
               onEdit={handleEdit}
               onExitEdit={handleExitEdit}
@@ -241,6 +275,7 @@ function AppShell() {
             <PricingPage
               onSimulateUnlock={() => {
                 setIsTeaserResult(false);
+                setDevUnlocked(true);
                 sessionStorage.removeItem('teaser_thumbnail');
               }}
             />
