@@ -1,0 +1,12 @@
+# Supabase
+.branches
+.temp
+
+# dotenvx
+.env.keys
+.env.local
+.env.*.local
+
+# Local edge function secrets (Stripe keys, service role key, etc.) — read via
+# `supabase functions serve --env-file supabase/functions/.env`, never committed.
+functions/.env

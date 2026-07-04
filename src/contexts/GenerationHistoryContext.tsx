@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
+import { useAuth } from './AuthContext';
 
 export interface HistoryEntry {
   id: string;
@@ -23,14 +24,24 @@ interface GenerationHistoryContextValue {
   removeFromHistory: (imageUrl: string) => void;
 }
 
-const STORAGE_KEY = 'generation_history';
+const STORAGE_KEY_PREFIX = 'generation_history';
 const MAX_HISTORY_ENTRIES = 200;
 
 const GenerationHistoryContext = createContext<GenerationHistoryContextValue | null>(null);
 
-function readFromStorage(): HistoryEntry[] {
+// Namespaced per signed-in user — without this, every account that ever logs
+// into this browser reads and writes the exact same localStorage key, so
+// switching accounts (or a shared/dev machine) would show one user's
+// thumbnails as another user's history. Falls back to a distinct
+// "anonymous" bucket for the no-real-session dev bypass, which never mixes
+// with any real account's key.
+function storageKeyFor(userId: string | undefined): string {
+  return `${STORAGE_KEY_PREFIX}_${userId ?? 'anonymous'}`;
+}
+
+function readFromStorage(key: string): HistoryEntry[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -43,16 +54,29 @@ function readFromStorage(): HistoryEntry[] {
 // the same entries (the heart button), not a separate list, so un-hearting
 // something doesn't remove it from history — only the delete button does that.
 // No Supabase table for this (no equivalent of the mobile app's
-// thumbnailStorage.ts here) — a lightweight localStorage store instead,
-// capped at MAX_HISTORY_ENTRIES most-recent entries. Note: the underlying
-// image URLs are signed Supabase Storage links with a 7-day expiry — old
-// entries will eventually stop loading.
+// thumbnailStorage.ts here) — a per-user-namespaced localStorage store
+// instead (see storageKeyFor), capped at MAX_HISTORY_ENTRIES most-recent
+// entries. Note: the underlying image URLs are signed Supabase Storage links
+// with a 7-day expiry — old entries will eventually stop loading.
 export function GenerationHistoryProvider({ children }: { children: ReactNode }) {
-  const [history, setHistory] = useState<HistoryEntry[]>(() => readFromStorage());
+  const { user } = useAuth();
+  const storageKey = storageKeyFor(user?.id);
+  const [history, setHistory] = useState<HistoryEntry[]>(() => readFromStorage(storageKey));
+  // Tracks which key `history` currently reflects. Adjusted during render
+  // (React's documented pattern for "derived state reset on prop change"),
+  // not in an effect — an effect would commit the OLD user's in-memory
+  // history into the NEW user's storage key for one render before the
+  // reload got a chance to replace it.
+  const [loadedKey, setLoadedKey] = useState(storageKey);
+
+  if (loadedKey !== storageKey) {
+    setLoadedKey(storageKey);
+    setHistory(readFromStorage(storageKey));
+  }
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
-  }, [history]);
+    localStorage.setItem(storageKey, JSON.stringify(history));
+  }, [storageKey, history]);
 
   const addToHistory = useCallback((imageUrl: string, prompt: string) => {
     setHistory((prev) => {

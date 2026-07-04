@@ -1,14 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useCredits } from '../contexts/CreditsContext';
-
-interface SupportForm {
-  name: string;
-  email: string;
-  subject: string;
-  message: string;
-}
 
 const PLAN_LABELS: Record<string, string> = {
   weekly: 'Weekly Professional',
@@ -38,13 +31,17 @@ function getNextResetDate(plan: string | null, lastReset: string | null, subscri
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { user, profile, signOut, deleteAccount } = useAuth();
+  const { user, profile, signOut, deleteAccount, updateProfile } = useAuth();
   const { current: creditsCurrent, max: creditsMax, loading: creditsLoading } = useCredits();
-  const [support, setSupport] = useState<SupportForm>({ name: '', email: '', subject: '', message: '' });
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [editProfileError, setEditProfileError] = useState<string | null>(null);
 
   async function handleSignOut() {
     setAccountError(null);
@@ -71,19 +68,30 @@ export default function SettingsPage() {
     }
   }
 
-  function handleSupportChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) {
-    setSupport((prev) => ({ ...prev, [e.target.name]: e.target.value }));
-  }
-
-  function handleSupportSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    // TODO: wire up to Supabase / email provider
-    console.log('Support message:', support);
-  }
-
   const displayName = profile?.name || user?.email?.split('@')[0] || 'Creator';
   const displayEmail = profile?.email || user?.email || '';
   const avatarLetter = displayName.charAt(0).toUpperCase() || '?';
+
+  function openEditProfile() {
+    setEditName(displayName);
+    setEditEmail(displayEmail);
+    setEditProfileError(null);
+    setShowEditProfile(true);
+  }
+
+  async function handleSaveProfile(e: React.FormEvent) {
+    e.preventDefault();
+    setEditProfileError(null);
+    setIsSavingProfile(true);
+    try {
+      await updateProfile({ name: editName.trim(), email: editEmail.trim() });
+      setShowEditProfile(false);
+    } catch (err) {
+      setEditProfileError(err instanceof Error ? err.message : 'Failed to update profile. Please try again.');
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
 
   const planKey = profile?.subscription_plan ?? null;
   const isPro = profile?.is_pro_version ?? false;
@@ -95,14 +103,6 @@ export default function SettingsPage() {
   const trialEnds = formatDate(profile?.trial_end_date ?? null);
 
   const creditsPercent = creditsMax > 0 ? Math.round(((creditsMax - creditsCurrent) / creditsMax) * 100) : 0;
-
-  useEffect(() => {
-    setSupport((prev) => ({
-      ...prev,
-      name: prev.name || profile?.name || '',
-      email: prev.email || displayEmail,
-    }));
-  }, [profile, displayEmail]);
 
   return (
     <main className="pt-16 min-h-screen bg-surface overflow-y-auto relative">
@@ -137,7 +137,10 @@ export default function SettingsPage() {
                 <h2 className="font-headline text-xl font-bold">{displayName}</h2>
                 <p className="text-sm text-outline">{displayEmail}</p>
               </div>
-              <button className="mt-2 w-full py-3 bg-surface-container-highest hover:bg-surface-bright transition-colors rounded-full text-sm font-bold border border-outline-variant/10">
+              <button
+                onClick={openEditProfile}
+                className="mt-2 w-full py-3 bg-surface-container-highest hover:bg-surface-bright transition-colors rounded-full text-sm font-bold border border-outline-variant/10"
+              >
                 Edit Profile
               </button>
             </div>
@@ -212,11 +215,6 @@ export default function SettingsPage() {
                   </p>
                 </div>
                 <div className="flex gap-3">
-                  {isPro && (
-                    <button className="px-6 py-2 rounded-full border border-outline-variant/30 text-sm font-bold hover:bg-surface-container-highest transition-all">
-                      Cancel
-                    </button>
-                  )}
                   <button
                     onClick={() => navigate('/pricing')}
                     className="px-6 py-2 rounded-full bg-primary-container text-on-primary-container text-sm font-bold hover:brightness-110 active:scale-95 transition-all"
@@ -227,70 +225,20 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {/* Info + Support two-column */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* About */}
-              <div className="bg-surface-container-low rounded-xl p-8 flex flex-col gap-4">
-                <h3 className="font-headline text-lg font-bold">About Darkroom</h3>
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-start gap-3">
-                    <span className="material-symbols-outlined text-primary text-xl">auto_fix</span>
-                    <p className="text-sm text-on-surface-variant leading-relaxed">
-                      Neural-engine powered thumbnail generation for professional creators.
-                    </p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <span className="material-symbols-outlined text-primary text-xl">verified_user</span>
-                    <p className="text-sm text-on-surface-variant">Version 4.2.0-stable (Cinema Edition)</p>
-                  </div>
+            {/* About */}
+            <div className="bg-surface-container-low rounded-xl p-8 flex flex-col gap-4">
+              <h3 className="font-headline text-lg font-bold">About AI Thumbnail Generator</h3>
+              <div className="flex flex-col gap-3">
+                <div className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-primary text-xl">auto_fix</span>
+                  <p className="text-sm text-on-surface-variant leading-relaxed">
+                    AI-powered thumbnail generation built for YouTube creators.
+                  </p>
                 </div>
-              </div>
-
-              {/* Support */}
-              <div className="bg-surface-container-low rounded-xl p-8 flex flex-col gap-6">
-                <h3 className="font-headline text-lg font-bold">Help &amp; Support</h3>
-                <form onSubmit={handleSupportSubmit} className="flex flex-col gap-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <input
-                      className="bg-surface-container-lowest border-none rounded-lg p-3 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
-                      placeholder="Name"
-                      type="text"
-                      name="name"
-                      value={support.name}
-                      onChange={handleSupportChange}
-                    />
-                    <input
-                      className="bg-surface-container-lowest border-none rounded-lg p-3 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
-                      placeholder="Email"
-                      type="email"
-                      name="email"
-                      value={support.email}
-                      onChange={handleSupportChange}
-                    />
-                  </div>
-                  <input
-                    className="bg-surface-container-lowest border-none rounded-lg p-3 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
-                    placeholder="Subject"
-                    type="text"
-                    name="subject"
-                    value={support.subject}
-                    onChange={handleSupportChange}
-                  />
-                  <textarea
-                    className="bg-surface-container-lowest border-none rounded-lg p-3 text-xs text-on-surface focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                    placeholder="Message"
-                    rows={2}
-                    name="message"
-                    value={support.message}
-                    onChange={handleSupportChange}
-                  />
-                  <button
-                    type="submit"
-                    className="w-full py-3 bg-secondary-container text-on-secondary-container rounded-full text-xs font-bold hover:bg-secondary transition-colors"
-                  >
-                    Send Message
-                  </button>
-                </form>
+                <div className="flex items-start gap-3">
+                  <span className="material-symbols-outlined text-primary text-xl">verified_user</span>
+                  <p className="text-sm text-on-surface-variant">Version 4.2.0-stable</p>
+                </div>
               </div>
             </div>
 
@@ -360,6 +308,60 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {showEditProfile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <form
+            onSubmit={handleSaveProfile}
+            className="bg-zinc-900 border border-outline-variant/20 rounded-3xl p-6 w-full max-w-sm shadow-2xl flex flex-col gap-5"
+          >
+            <div>
+              <h2 className="font-headline font-bold text-lg text-on-surface">Edit Profile</h2>
+              <p className="text-xs text-on-surface-variant mt-1">Update your display name and email address.</p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-outline uppercase tracking-widest">Name</label>
+                <input
+                  className="bg-surface-container-lowest border-none rounded-lg p-3 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-outline uppercase tracking-widest">Email</label>
+                <input
+                  className="bg-surface-container-lowest border-none rounded-lg p-3 text-sm text-on-surface focus:outline-none focus:ring-1 focus:ring-primary"
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+            {editProfileError && <p className="text-xs text-error">{editProfileError}</p>}
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowEditProfile(false)}
+                disabled={isSavingProfile}
+                className="flex-1 py-2.5 rounded-xl border border-outline-variant/30 text-sm font-bold text-on-surface-variant hover:bg-surface-container transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSavingProfile}
+                className="flex-1 py-2.5 rounded-xl bg-primary text-on-primary font-bold text-sm hover:brightness-110 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSavingProfile ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </main>

@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { usePageMeta } from '../hooks/usePageMeta';
 import { supabase } from '../lib/supabase';
 import { generateThumbnails } from '../services/generationService';
+import { createCheckoutUrl, PENDING_PLAN_KEY, type PlanId } from '../services/checkoutService';
 
 // Give the OAuth callback this long to actually produce a SIGNED_IN event
 // before giving up and treating it as a failed/cancelled attempt — otherwise a
@@ -29,6 +30,23 @@ export default function AuthCallback() {
         // set) are left untouched so the user can retry the same generation.
         window.location.href = '/';
         return;
+      }
+
+      // Signed in via Google after clicking Subscribe while signed out — send
+      // them straight into Stripe Checkout instead of just landing on the
+      // home page with no continuation of what they came here to do.
+      const pendingPlan = sessionStorage.getItem(PENDING_PLAN_KEY) as PlanId | null;
+      if (pendingPlan) {
+        sessionStorage.removeItem(PENDING_PLAN_KEY);
+        try {
+          const url = await createCheckoutUrl(pendingPlan);
+          window.location.href = url;
+          return;
+        } catch (err) {
+          console.error('Failed to resume checkout after Google auth:', err);
+          window.location.href = '/pricing';
+          return;
+        }
       }
 
       const pendingPrompt = sessionStorage.getItem('pending_prompt');

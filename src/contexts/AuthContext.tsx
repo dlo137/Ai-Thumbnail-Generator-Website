@@ -22,10 +22,14 @@ interface AuthContextValue {
   profile: Profile | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
+  /** Returns needsEmailConfirm: true when the project requires confirming the
+   *  email before a session exists yet — callers should show a "check your
+   *  inbox" state instead of treating sign-up as immediately complete. */
+  signUp: (email: string, password: string) => Promise<{ needsEmailConfirm: boolean }>;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  updateProfile: (updates: { name?: string; email?: string }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -85,8 +89,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({ email, password });
     if (error) throw new Error(error.message);
+    return { needsEmailConfirm: !data.session };
   }, []);
 
   const signOut = useCallback(async () => {
@@ -113,9 +118,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   }, []);
 
+  // Updates the profiles row backing the Settings page's editable name/email
+  // fields — a plain table update, not a Supabase Auth email change (which
+  // would require re-verification and is out of scope here).
+  const updateProfile = useCallback(
+    async (updates: { name?: string; email?: string }) => {
+      if (!user) throw new Error('You must be signed in to update your profile.');
+
+      const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
+      if (error) throw new Error(error.message);
+
+      await fetchProfile(user.id);
+    },
+    [user, fetchProfile]
+  );
+
   return (
     <AuthContext.Provider
-      value={{ user, profile, isLoading, signIn, signUp, signOut, deleteAccount, refreshProfile }}
+      value={{ user, profile, isLoading, signIn, signUp, signOut, deleteAccount, refreshProfile, updateProfile }}
     >
       {children}
     </AuthContext.Provider>

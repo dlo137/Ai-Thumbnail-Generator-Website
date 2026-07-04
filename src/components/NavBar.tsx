@@ -1,5 +1,9 @@
-import { NavLink, Link, useLocation } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
 import icon from '../assets/icon.png';
+import { useCredits } from '../contexts/CreditsContext';
+
+// 1 credit = 10 bolts, purely a cosmetic conversion for display.
+const BOLTS_PER_CREDIT = 10;
 
 const navItems = [
   { label: 'Home', icon: 'home', to: '/' },
@@ -14,8 +18,7 @@ interface NavBarProps {
 }
 
 export default function NavBar({ showSearch = false, searchQuery = '', onSearchChange }: NavBarProps) {
-  const { pathname } = useLocation();
-  const isSettings = pathname === '/settings';
+  const { current, max } = useCredits();
 
   return (
     <header className="fixed top-0 left-0 right-0 h-16 z-50 bg-[#070a0d]/80 backdrop-blur-xl border-b border-[#414755]/15 shadow-[0_8px_32px_rgba(29,78,216,0.08)] flex items-center px-8 gap-8">
@@ -62,9 +65,14 @@ export default function NavBar({ showSearch = false, searchQuery = '', onSearchC
         ) : null}
         <Link
           to="/settings"
-          className={`hover:text-primary transition-colors text-on-surface ${isSettings ? 'text-primary' : ''}`}
+          className="flex items-center gap-1 bg-surface-container-lowest border border-blue-500 rounded-full pl-2 pr-2.5 py-0.5 text-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)] hover:bg-surface-container transition-colors"
         >
-          <span className="material-symbols-outlined">settings</span>
+          <span className="material-symbols-outlined text-base" style={{ fontVariationSettings: "'FILL' 1" }}>
+            bolt
+          </span>
+          <span className="text-xs font-bold">
+            {current * BOLTS_PER_CREDIT} / {max * BOLTS_PER_CREDIT}
+          </span>
         </Link>
         <Link to="/settings" className="w-8 h-8 rounded-full border border-primary/20 p-0.5 block shrink-0">
           <img

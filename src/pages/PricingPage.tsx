@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
+import { createCheckoutUrl, PENDING_PLAN_KEY } from '../services/checkoutService';
+import PricingFaq from '../components/PricingFaq';
 
 type EntryPath = 'explore' | 'ready';
 
@@ -23,6 +27,11 @@ interface Plan {
   ctaLabel: string;
   ctaClass: string;
   popular?: boolean;
+  /** Total credits granted in one lump sum at purchase, for plans that don't
+   *  grant on a monthly cycle (currently only the yearly plan — 1,080 up
+   *  front instead of accruing 90/month). Used by the checkout/webhook flow,
+   *  not just display. */
+  creditsGrantedTotal?: number;
 }
 
 const PLANS: Plan[] = [
@@ -33,8 +42,8 @@ const PLANS: Plan[] = [
     icon: 'bolt',
     price: 4.99,
     period: 'week',
-    charges: '1,000 charges included',
-    monthlyThumbnailCap: 30,
+    charges: '1,000 charges per week',
+    monthlyThumbnailCap: 10,
     monthlyEquivalent: '≈ $21.62/mo if billed weekly',
     annualEquivalent: '≈ $259.48/yr if billed weekly',
     ctaLabel: 'Subscribe Now — $4.99/wk',
@@ -65,7 +74,7 @@ const PLANS: Plan[] = [
     icon: 'auto_awesome',
     price: 9.99,
     period: 'month',
-    charges: '7,500 charges included',
+    charges: '7,500 charges per month',
     monthlyThumbnailCap: 75,
     monthlyEquivalent: 'Billed monthly',
     annualEquivalent: '≈ $119.88/yr if billed monthly',
@@ -102,12 +111,13 @@ const PLANS: Plan[] = [
     icon: 'workspace_premium',
     price: 39.99,
     period: 'year',
-    charges: '9,000 charges included / month',
+    charges: '9,000 charges per month',
     monthlyThumbnailCap: 90,
     monthlyEquivalent: '≈ $3.33/mo if billed annually',
     annualEquivalent: 'Billed annually',
     ctaLabel: 'Subscribe Now — $39.99/yr',
     ctaClass: 'bg-tertiary text-on-tertiary hover:shadow-[0_0_24px_rgba(249,189,34,0.4)]',
+    creditsGrantedTotal: 1080,
     features: [
       {
         title: 'Everything in Monthly, plus:',
@@ -133,68 +143,9 @@ const PLANS: Plan[] = [
   },
 ];
 
-interface FaqItem {
-  question: string;
-  answer: string[];
-  bullets?: string[];
-}
-
-const FAQS: FaqItem[] = [
-  {
-    question: 'What is AI Thumbnail Generator?',
-    answer: [
-      "AI Thumbnail Generator is built for one job: getting your videos clicked. It's not a general-purpose AI image tool — every part of it is built around YouTube and social thumbnail formats, fast iteration, and results that actually match what performs.",
-      'No designers. No stock photos. No guesswork.',
-    ],
-  },
-  {
-    question: 'Why choose AI Thumbnail Generator over ChatGPT, generic AI image apps, or hiring a designer?',
-    answer: [
-      'Those tools generate images. We generate thumbnails — built for the exact dimensions, styles, and attention-grabbing choices that get videos clicked, not generic AI art.',
-      'What we do differently:',
-    ],
-    bullets: [
-      "Generate multiple thumbnail variations per prompt, so you're picking the best of several, not gambling on one output",
-      'Stay consistent with your face and brand using Reference — upload your photos once, reuse yourself across every thumbnail',
-      'Fix or adjust an existing thumbnail with a quick follow-up prompt instead of starting over',
-      'No design software, no learning curve — describe what you want, we generate it',
-    ],
-  },
-  {
-    question: 'Can I use it with my own face?',
-    answer: [
-      'Yes.',
-      'Upload your reference photos once, and every thumbnail you generate afterward stays consistent — same face, same look, no reshoots.',
-    ],
-  },
-  {
-    question: 'Do I need design skills to use it?',
-    answer: [
-      'No.',
-      'You describe what you want in plain language, and the app handles the generation. No layers, no design software, no learning curve.',
-    ],
-  },
-  {
-    question: 'How does the image quota work?',
-    answer: ['Your plan includes a set number of thumbnail generations per month, based on the plan you choose.'],
-  },
-  {
-    question: 'Can I get more if I run out?',
-    answer: ['Yes — you can purchase additional image packs anytime without changing your subscription plan.'],
-  },
-  {
-    question: 'Do unused images roll over?',
-    answer: ['Your monthly quota resets each billing cycle, so use what you need before it renews.'],
-  },
-  {
-    question: 'How do I manage or cancel my subscription?',
-    answer: ['Manage everything directly through your account settings — no emails, no back and forth.'],
-  },
-  {
-    question: 'Can I ask questions privately?',
-    answer: ['Yes — reach out to support directly and the team will help.'],
-  },
-];
+// Relative tier order (not price) — used to tell an existing subscriber
+// whether a given plan would be an upgrade or downgrade from what they have.
+const PLAN_RANK: Record<Plan['id'], number> = { weekly: 0, monthly: 1, yearly: 2 };
 
 const ENTRY_COPY: Record<EntryPath, { label: string; recommends: Plan['id'] }> = {
   explore: {
@@ -213,6 +164,12 @@ interface PricingPageProps {
   /** Dev-only: when provided, shows a button that unlocks the blurred teaser
    *  thumbnail from the free/dev-bypass generation without a real purchase. */
   onSimulateUnlock?: () => void;
+  /** Renders as an in-page `<section id="pricing">` instead of a standalone
+   *  `<main>` — used when embedded inline on LandingPage instead of routed
+   *  to directly, so it scrolls as part of that page rather than owning its
+   *  own top-level layout (fixed navbar offset, viewport-pinned background
+   *  blobs, etc). */
+  embedded?: boolean;
 }
 
 function parseStatValue(raw: number | string): { target: number; suffix: string } {
@@ -259,27 +216,86 @@ function AnimatedStatValue({
 }
 
 export default function PricingPage({
-  activeCreators = '687+',
-  thumbnailsGenerated = '10,000+',
+  activeCreators,
+  thumbnailsGenerated,
   onSimulateUnlock,
+  embedded = false,
 }: PricingPageProps) {
   const navigate = useNavigate();
-  const [entryPath, setEntryPath] = useState<EntryPath>('explore');
+  const { profile } = useAuth();
+  // Only treat a plan as "current" while the user is actively subscribed —
+  // a stale subscription_plan value on a lapsed/free profile shouldn't grey
+  // out a card the user could otherwise pick again.
+  const currentPlanId = profile?.is_pro_version ? profile.subscription_plan : null;
+  const currentPlanRank =
+    currentPlanId && currentPlanId in PLAN_RANK ? PLAN_RANK[currentPlanId as Plan['id']] : null;
+  const [entryPath, setEntryPath] = useState<EntryPath>('ready');
   // Defaults to the active tab's recommendation, but a direct click on any
   // price card overrides it — the tab only re-drives this when it's clicked.
-  const [selectedPlan, setSelectedPlan] = useState<Plan['id']>(ENTRY_COPY.explore.recommends);
-  const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<Plan['id']>(ENTRY_COPY.ready.recommends);
+  // Per-card checkout state — loading/error is keyed by plan id so clicking
+  // one Subscribe button doesn't affect the others' state.
+  const [checkoutLoadingPlan, setCheckoutLoadingPlan] = useState<Plan['id'] | null>(null);
+  const [checkoutErrors, setCheckoutErrors] = useState<Partial<Record<Plan['id'], string>>>({});
 
+  async function handleSubscribeClick(plan: Plan) {
+    setCheckoutLoadingPlan(plan.id);
+    setCheckoutErrors((prev) => ({ ...prev, [plan.id]: undefined }));
+    try {
+      // PricingPage is reachable signed-out (embedded on LandingPage) — a
+      // signed-out click doesn't fail here, it kicks off the
+      // login → account created → straight into Stripe Checkout flow.
+      // Remembering which plan they wanted so AuthPage/AuthCallback can pick
+      // up checkout automatically once a session actually exists, instead of
+      // just dropping them on the home page with no continuation.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        sessionStorage.setItem(PENDING_PLAN_KEY, plan.id);
+        navigate('/login');
+        return;
+      }
+
+      const url = await createCheckoutUrl(plan.id);
+      window.location.href = url;
+    } catch (err) {
+      setCheckoutErrors((prev) => ({
+        ...prev,
+        [plan.id]: err instanceof Error ? err.message : 'Something went wrong. Please try again.',
+      }));
+      setCheckoutLoadingPlan(null);
+    }
+  }
+
+  // Real numbers only — no placeholder stats block renders unless a caller
+  // actually passes live values in.
   const stats = [
-    { icon: 'group', value: activeCreators, label: 'Active Creators', start: 327, intervalMs: 1500 },
-    { icon: 'bolt', value: thumbnailsGenerated, label: 'Thumbnails Created', start: 9677, intervalMs: 500 },
-  ];
+    activeCreators != null
+      ? { icon: 'group', value: activeCreators, label: 'Active Creators', start: 327, intervalMs: 1500 }
+      : null,
+    thumbnailsGenerated != null
+      ? { icon: 'bolt', value: thumbnailsGenerated, label: 'Thumbnails Created', start: 9677, intervalMs: 500 }
+      : null,
+  ].filter((stat): stat is NonNullable<typeof stat> => stat !== null);
+
+  const Wrapper = embedded ? 'section' : 'main';
 
   return (
-    <main className="pt-16 min-h-screen bg-surface overflow-y-auto relative">
+    <Wrapper
+      id={embedded ? 'pricing' : undefined}
+      className={
+        embedded ? 'bg-surface relative py-24' : 'pt-16 min-h-screen bg-surface overflow-y-auto relative'
+      }
+    >
       {/* Ambient background blobs */}
-      <div className="fixed top-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[120px] pointer-events-none z-0" />
-      <div className="fixed bottom-[-5%] left-[10%] w-[30%] h-[30%] bg-tertiary/5 rounded-full blur-[100px] pointer-events-none z-0" />
+      <div
+        className={`${embedded ? 'absolute' : 'fixed'} top-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[120px] pointer-events-none z-0`}
+      />
+      <div
+        className={`${embedded ? 'absolute' : 'fixed'} bottom-[-5%] left-[10%] w-[30%] h-[30%] bg-tertiary/5 rounded-full blur-[100px] pointer-events-none z-0`}
+      />
 
       <div className="relative z-10 max-w-7xl mx-auto px-6 md:px-10 pt-16 pb-24 flex flex-col items-center gap-16">
         {/* Header */}
@@ -331,20 +347,31 @@ export default function PricingPage({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8 w-full items-start">
           {PLANS.map((plan) => {
             const isRecommended = selectedPlan === plan.id;
+            const isCurrentPlan = plan.id === currentPlanId;
+            // Only meaningful for an active subscriber looking at a *different*
+            // plan card — the current plan's own card already shows "Current
+            // Plan" instead, so there's no equal-rank case to handle here.
+            const subscribeLabel =
+              currentPlanRank === null ? 'Subscribe' : PLAN_RANK[plan.id] > currentPlanRank ? 'Upgrade' : 'Downgrade';
 
             return (
               <div
                 key={plan.id}
                 onClick={() => {
+                  if (isCurrentPlan) return;
                   setSelectedPlan(plan.id);
                   setEntryPath(plan.id === 'yearly' ? 'ready' : 'explore');
                 }}
-                className={`relative flex flex-col gap-6 rounded-xl p-8 overflow-hidden transition-all cursor-pointer bg-surface-container-low ${
-                  isRecommended
-                    ? plan.id === 'yearly'
-                      ? 'border-2 border-emerald-500 shadow-[0_0_50px_rgba(16,185,129,0.25)]'
-                      : 'border-2 border-blue-500 shadow-[0_0_50px_rgba(59,130,246,0.3)]'
-                    : 'border border-outline-variant/10'
+                className={`relative flex flex-col gap-6 rounded-xl p-8 overflow-hidden transition-all bg-surface-container-low ${
+                  isCurrentPlan
+                    ? 'opacity-50 grayscale cursor-not-allowed border border-outline-variant/10'
+                    : `cursor-pointer ${
+                        isRecommended
+                          ? plan.id === 'yearly'
+                            ? 'border-2 border-emerald-500 shadow-[0_0_50px_rgba(16,185,129,0.25)]'
+                            : 'border-2 border-blue-500 shadow-[0_0_50px_rgba(59,130,246,0.3)]'
+                          : 'border border-outline-variant/10'
+                      }`
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -379,21 +406,46 @@ export default function PricingPage({
 
                 <div className="flex flex-col gap-2">
                   <p className="text-xs font-bold text-on-surface-variant">
-                    Generate up to {plan.monthlyThumbnailCap} Thumbnails per month.
+                    Generate up to {plan.monthlyThumbnailCap} Thumbnails per {plan.period === 'week' ? 'week' : 'month'}.
                   </p>
 
                   <button
-                    className={`w-full py-3.5 rounded-full font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg ${
-                      isRecommended
-                        ? plan.id === 'yearly'
-                          ? 'bg-emerald-500 text-on-primary hover:shadow-[0_0_24px_rgba(16,185,129,0.4)]'
-                          : 'bg-blue-500 text-on-primary hover:shadow-[0_0_24px_rgba(59,130,246,0.5)]'
-                        : 'bg-surface-container-highest text-on-surface-variant'
+                    disabled={isCurrentPlan || checkoutLoadingPlan === plan.id}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!isCurrentPlan) handleSubscribeClick(plan);
+                    }}
+                    className={`w-full py-3.5 rounded-full font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all shadow-lg disabled:cursor-not-allowed disabled:active:scale-100 ${
+                      isCurrentPlan
+                        ? 'bg-surface-container-highest text-on-surface-variant'
+                        : isRecommended
+                          ? plan.id === 'yearly'
+                            ? 'bg-emerald-500 text-on-primary hover:shadow-[0_0_24px_rgba(16,185,129,0.4)]'
+                            : 'bg-blue-500 text-on-primary hover:shadow-[0_0_24px_rgba(59,130,246,0.5)]'
+                          : 'bg-surface-container-highest text-on-surface-variant'
                     }`}
                   >
-                    Subscribe
-                    <span className="material-symbols-outlined text-base">chevron_right</span>
+                    {isCurrentPlan ? (
+                      'Current Plan'
+                    ) : checkoutLoadingPlan === plan.id ? (
+                      <>
+                        <span className="w-4 h-4 border-2 border-current/30 border-t-current rounded-full animate-spin" />
+                        Redirecting…
+                      </>
+                    ) : (
+                      <>
+                        {subscribeLabel}
+                        <span className="material-symbols-outlined text-base">chevron_right</span>
+                      </>
+                    )}
                   </button>
+
+                  {checkoutErrors[plan.id] && (
+                    <p className="text-xs text-error flex items-center gap-1.5 justify-center">
+                      <span className="material-symbols-outlined text-sm">error</span>
+                      {checkoutErrors[plan.id]}
+                    </p>
+                  )}
 
                   <p className="text-xs text-outline text-center">Cancel Anytime. No Commitment.</p>
                 </div>
@@ -435,103 +487,30 @@ export default function PricingPage({
           })}
         </div>
 
-        {/* Stats row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 w-full">
-          {stats.map((stat) => (
-            <div
-              key={stat.label}
-              className="flex flex-col items-center text-center gap-2 bg-surface-container-low rounded-xl p-8 border border-outline-variant/10"
-            >
-              <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 mb-1">
-                <span className="material-symbols-outlined text-xl">{stat.icon}</span>
-              </div>
-              <p className="text-4xl font-headline font-extrabold text-on-surface">
-                <AnimatedStatValue value={stat.value} start={stat.start} intervalMs={stat.intervalMs} />
-              </p>
-              <p className="text-sm text-on-surface-variant">{stat.label}</p>
-            </div>
-          ))}
-
-          <div className="flex flex-col items-center justify-center text-center gap-2 bg-surface-container-low rounded-xl p-8 border border-outline-variant/10">
-            <p className="text-4xl font-headline font-extrabold text-on-surface mb-1">5 Star Rating</p>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <span
-                  key={i}
-                  className="material-symbols-outlined text-3xl text-blue-500 drop-shadow-[0_0_6px_rgba(59,130,246,0.8)]"
-                  style={{ fontVariationSettings: "'FILL' 0" }}
-                >
-                  star
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* FAQ */}
-        <section className="w-full max-w-3xl flex flex-col gap-8">
-          <div className="text-center flex flex-col gap-2">
-            <h2 className="font-headline text-3xl md:text-4xl font-extrabold text-on-surface">
-              Frequently Asked Questions
-            </h2>
-            <p className="text-on-surface-variant text-base">The most common questions, answered.</p>
-            <p className="text-sm text-on-surface-variant">
-              Anything else?{' '}
-              <Link to="/settings" className="text-blue-500 font-bold hover:underline">
-                Click here
-              </Link>{' '}
-              to talk directly to the team.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {FAQS.map((faq, index) => {
-              const isOpen = openFaq === index;
-              return (
-                <div
-                  key={faq.question}
-                  className="bg-surface-container-low border border-outline-variant/10 rounded-xl overflow-hidden"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setOpenFaq(isOpen ? null : index)}
-                    className="w-full flex items-center justify-between gap-4 px-6 py-5 text-left"
-                  >
-                    <span className="font-headline font-bold text-on-surface">{faq.question}</span>
-                    <span
-                      className={`material-symbols-outlined text-on-surface-variant transition-transform shrink-0 ${
-                        isOpen ? 'rotate-180' : ''
-                      }`}
-                    >
-                      expand_more
-                    </span>
-                  </button>
-                  {isOpen && (
-                    <div className="px-6 pb-5 flex flex-col gap-2">
-                      {faq.answer.map((paragraph, i) => (
-                        <p key={i} className="text-sm text-on-surface-variant leading-relaxed">
-                          {paragraph}
-                        </p>
-                      ))}
-                      {faq.bullets && (
-                        <ul className="flex flex-col gap-2 mt-1">
-                          {faq.bullets.map((bullet) => (
-                            <li key={bullet} className="flex items-start gap-2 text-sm text-on-surface-variant leading-relaxed">
-                              <span className="material-symbols-outlined text-blue-500 text-base mt-0.5 shrink-0">
-                                check_circle
-                              </span>
-                              {bullet}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  )}
+        {/* Stats row — only rendered when a caller passes real values in;
+            no placeholder/fake numbers ship on their own. */}
+        {stats.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 w-full">
+            {stats.map((stat) => (
+              <div
+                key={stat.label}
+                className="flex flex-col items-center text-center gap-2 bg-surface-container-low rounded-xl p-8 border border-outline-variant/10"
+              >
+                <div className="w-10 h-10 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 mb-1">
+                  <span className="material-symbols-outlined text-xl">{stat.icon}</span>
                 </div>
-              );
-            })}
+                <p className="text-4xl font-headline font-extrabold text-on-surface">
+                  <AnimatedStatValue value={stat.value} start={stat.start} intervalMs={stat.intervalMs} />
+                </p>
+                <p className="text-sm text-on-surface-variant">{stat.label}</p>
+              </div>
+            ))}
           </div>
-        </section>
+        )}
+
+        {/* FAQ — omitted when embedded on LandingPage, which renders its own
+            PricingFaq lower on the page (after the Features section). */}
+        {!embedded && <PricingFaq />}
 
         {onSimulateUnlock && (
           <button
@@ -546,6 +525,6 @@ export default function PricingPage({
           </button>
         )}
       </div>
-    </main>
+    </Wrapper>
   );
 }

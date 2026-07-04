@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
-import { CreditsProvider } from './contexts/CreditsContext';
+import { CreditsProvider, useCredits } from './contexts/CreditsContext';
 import { GenerationHistoryProvider, useGenerationHistory } from './contexts/GenerationHistoryContext';
-import { ToastProvider } from './contexts/ToastContext';
+import { ToastProvider, useToast } from './contexts/ToastContext';
 import NavBar from './components/NavBar';
 import PromptBar from './components/PromptBar';
 import HomePage from './pages/HomePage';
@@ -23,7 +23,10 @@ type GenStatus = 'idle' | 'loading' | 'success' | 'error';
 function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { addToHistory } = useGenerationHistory();
+  const { refreshCredits } = useCredits();
+  const { showToast } = useToast();
   const [genStatus, setGenStatus] = useState<GenStatus>('idle');
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [genError, setGenError] = useState<string | null>(null);
@@ -69,6 +72,7 @@ function AppShell() {
         const focusedIndex = editingIndex;
         setImageUrls((prev) => prev.map((url, i) => (i === focusedIndex ? newUrl : url)));
         addToHistory(newUrl, prompt);
+        refreshCredits();
       } catch (err) {
         setEditError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
       } finally {
@@ -88,6 +92,7 @@ function AppShell() {
       setImageUrls(urls);
       setGenStatus('success');
       urls.forEach((url) => addToHistory(url, prompt));
+      refreshCredits();
     } catch (err) {
       setGenError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
       setGenStatus('error');
@@ -111,6 +116,7 @@ function AppShell() {
           setImageUrls(urls);
           setGenStatus('success');
           urls.forEach((url) => addToHistory(url, teaserPrompt ?? ''));
+          refreshCredits();
           return;
         }
       } catch {
@@ -119,12 +125,59 @@ function AppShell() {
     }
 
     const pendingPrompt = sessionStorage.getItem('pending_prompt');
-    if (!pendingPrompt) return;
-    sessionStorage.removeItem('pending_prompt');
-    setIsTeaserResult(true);
-    handleGenerate(pendingPrompt, 1, '16:9');
+    if (pendingPrompt) {
+      sessionStorage.removeItem('pending_prompt');
+      setIsTeaserResult(true);
+      handleGenerate(pendingPrompt, 1, '16:9');
+      return;
+    }
+
+    // Fallback for a full page reload with no fresh generation to run —
+    // notably Stripe Checkout's redirect back from a real purchase, which is
+    // an actual browser navigation that wipes all of the above in-memory
+    // state. dev_bypass_results/pending_prompt are both long gone by then
+    // (consumed when the teaser was first generated), so without this the
+    // locked thumbnail the user just paid to unlock would come back blank.
+    const storedTeaser = sessionStorage.getItem('teaser_thumbnail');
+    if (storedTeaser) {
+      try {
+        const { urls, prompt: teaserPrompt } = JSON.parse(storedTeaser) as { urls: string[]; prompt?: string };
+        if (urls && urls.length > 0) {
+          setIsTeaserResult(true);
+          setImageUrls(urls);
+          setGenStatus('success');
+          setPendingGenPrompt(teaserPrompt ?? '');
+        }
+      } catch {
+        // ignore malformed/stale entry
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keeps the locked teaser mirrored in sessionStorage the whole time it's
+  // showing, so the mount effect above has something to restore from if the
+  // page gets a hard reload (e.g. the Stripe Checkout round trip) before the
+  // user unlocks it.
+  useEffect(() => {
+    if (isTeaserResult && genStatus === 'success' && imageUrls.length > 0) {
+      sessionStorage.setItem('teaser_thumbnail', JSON.stringify({ urls: imageUrls, prompt: pendingGenPrompt }));
+    }
+  }, [isTeaserResult, genStatus, imageUrls, pendingGenPrompt]);
+
+  // Stripe Checkout's success_url lands back on `/?checkout=success` — unlock
+  // whatever teaser thumbnail was already showing (the whole point of
+  // subscribing was to reveal it), refresh the credits the webhook just
+  // granted, and strip the query param so it doesn't re-fire on a reload.
+  useEffect(() => {
+    if (pathname === '/' && searchParams.get('checkout') === 'success') {
+      setIsTeaserResult(false);
+      sessionStorage.removeItem('teaser_thumbnail');
+      refreshCredits();
+      showToast('Subscription active! Your thumbnail is unlocked.');
+      setSearchParams({}, { replace: true });
+    }
+  }, [pathname, searchParams, refreshCredits, showToast, setSearchParams]);
 
   function handleEdit(index: number) {
     setEditError(null);
@@ -142,6 +195,7 @@ function AppShell() {
   // being a static image with no way back into the generation flow.
   function handleEditFromHistory(imageUrl: string) {
     setIsTeaserResult(false);
+    sessionStorage.removeItem('teaser_thumbnail');
     setGenError(null);
     setImageUrls([imageUrl]);
     setGenStatus('success');
@@ -183,7 +237,14 @@ function AppShell() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route
           path="/pricing"
-          element={<PricingPage onSimulateUnlock={() => setIsTeaserResult(false)} />}
+          element={
+            <PricingPage
+              onSimulateUnlock={() => {
+                setIsTeaserResult(false);
+                sessionStorage.removeItem('teaser_thumbnail');
+              }}
+            />
+          }
         />
       </Routes>
 
@@ -206,18 +267,23 @@ function Layout() {
   // GeneratingPage's "Simulate sign up"). Never treat this as real auth.
   const devBypass = sessionStorage.getItem('dev_bypass_auth') === 'true';
 
-  // Handled outside the isLoading/user gate below: it needs to render (and run
-  // its own supabase.auth.getSession() check) immediately after an OAuth
-  // redirect, before AuthContext's own getSession()/isLoading resolve — and
-  // regardless of which branch that ends up choosing, since AppShell's and the
-  // signed-out Routes below don't otherwise share a route table.
-  if (pathname === '/auth/callback') {
+  // Handled outside the isLoading/user gate below: both need to render (and
+  // finish their own async work — resuming a paused OAuth session check, or
+  // GeneratingPage's progress bar + completeSignUp()) regardless of which
+  // branch the user/devBypass gate would otherwise pick. Without this, a
+  // real email/password sign-up establishes a session *while still on
+  // /generating* — the gate below flips to AppShell mid-flight, unmounting
+  // GeneratingPage (killing its progress bar before it reaches 100%, so
+  // completeSignUp() never runs) and stranding the user on a pathname
+  // AppShell's own <Routes> has no match for, since neither route table is
+  // shared between the two branches.
+  if (pathname === '/auth/callback' || pathname === '/generating') {
     return (
       <div
         className="dark text-on-surface font-body selection:bg-primary/30 min-h-screen"
         style={{ backgroundColor: '#070a0d' }}
       >
-        <AuthCallback />
+        {pathname === '/auth/callback' ? <AuthCallback /> : <GeneratingPage />}
       </div>
     );
   }
@@ -236,7 +302,6 @@ function Layout() {
       ) : (
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/generating" element={<GeneratingPage />} />
           <Route path="/signup" element={<AuthPage initialMode="sign-up" />} />
           <Route path="/login" element={<AuthPage initialMode="sign-in" />} />
           <Route path="/pricing" element={<PricingPage />} />

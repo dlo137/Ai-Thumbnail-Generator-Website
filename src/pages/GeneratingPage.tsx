@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
 import type { Provider } from '@supabase/supabase-js';
 import { usePageMeta } from '../hooks/usePageMeta';
 import HeroPromptInput from '../components/HeroPromptInput';
@@ -57,7 +56,6 @@ const DOCK_DELAY_MS = 700;
 const DOCK_TRANSITION_MS = 700;
 
 export default function GeneratingPage() {
-  const navigate = useNavigate();
   const [progress, setProgress] = useState(0);
   const [docked, setDocked] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
@@ -81,6 +79,17 @@ export default function GeneratingPage() {
   // the same completeSignUp(), but only the dev bypass should set the
   // dev_bypass_auth flag; a real session doesn't need it.
   const hasRealSessionRef = useRef(false);
+  // Cosmetic "live growth" tick, same trick as LandingPage's hero stat —
+  // resets to this base on every visit, never persists, so it never actually
+  // claims real-time accuracy.
+  const [trustedUsersCount, setTrustedUsersCount] = useState(774973);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTrustedUsersCount((count) => count + 1);
+    }, 250);
+    return () => clearInterval(interval);
+  }, []);
 
   usePageMeta(
     'Generating Your Thumbnail — AI Thumbnail Generator',
@@ -400,18 +409,26 @@ export default function GeneratingPage() {
                 {/* Avatar stand-ins + chat bubble */}
                 <div className="flex items-center gap-2">
                   <div className="flex -space-x-2">
-                    {['bg-rose-400', 'bg-amber-400', 'bg-sky-400', 'bg-violet-400'].map((color, i) => (
+                    {[
+                      { color: 'bg-rose-400', letter: 'J' },
+                      { color: 'bg-amber-400', letter: 'K' },
+                      { color: 'bg-sky-400', letter: 'M' },
+                      { color: 'bg-violet-400', letter: 'R' },
+                    ].map(({ color, letter }) => (
                       <span
-                        key={i}
-                        className={`w-7 h-7 rounded-full border-2 border-surface-container-low ${color}`}
-                      />
+                        key={letter}
+                        className={`w-7 h-7 rounded-full border-2 border-surface-container-low ${color} flex items-center justify-center text-[11px] font-bold text-white`}
+                      >
+                        {letter}
+                      </span>
                     ))}
                   </div>
                   <span className="material-symbols-outlined text-primary text-lg">chat_bubble</span>
                 </div>
 
                 <p className="text-sm text-on-surface-variant">
-                  Trusted by <span className="font-bold text-on-surface">774,973</span> Users
+                  Trusted by <span className="font-bold text-on-surface">{trustedUsersCount.toLocaleString()}</span>{' '}
+                  Users
                 </p>
               </div>
 
