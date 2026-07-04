@@ -32,10 +32,6 @@ function AppShell() {
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [genError, setGenError] = useState<string | null>(null);
   const [isTeaserResult, setIsTeaserResult] = useState(false);
-  // Dev-only escape hatch for PricingPage's "Simulate unlock" button — lets a
-  // developer preview the unlocked HomePage/History state without an actual
-  // subscription, overriding the real subscription-based lock below.
-  const [devUnlocked, setDevUnlocked] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -58,11 +54,10 @@ function AppShell() {
   // Locked whenever there's no active subscription — not just during the
   // one-off free/dev-bypass teaser flow. `profile` is null before it loads
   // or for the no-real-session dev bypass, and both fail closed (locked).
-  // `isTeaserResult` still forces locked too (covers the instant it's true
-  // but profile hasn't caught up yet); `devUnlocked` is the one deliberate
-  // override, for previewing the unlocked state without a real purchase.
+  // `isTeaserResult` still forces locked too, covering the instant it's true
+  // but profile hasn't caught up yet.
   const isSubscribed = profile?.is_pro_version ?? false;
-  const showLocked = (isTeaserResult || !isSubscribed) && !devUnlocked;
+  const showLocked = isTeaserResult || !isSubscribed;
 
   async function handleGenerate(
     prompt: string,
@@ -269,18 +264,7 @@ function AppShell() {
           element={<HistoryPage onEditThumbnail={handleEditFromHistory} searchQuery={historySearchQuery} />}
         />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route
-          path="/pricing"
-          element={
-            <PricingPage
-              onSimulateUnlock={() => {
-                setIsTeaserResult(false);
-                setDevUnlocked(true);
-                sessionStorage.removeItem('teaser_thumbnail');
-              }}
-            />
-          }
-        />
+        <Route path="/pricing" element={<PricingPage />} />
       </Routes>
 
       {showPromptBar && (

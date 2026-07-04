@@ -161,9 +161,6 @@ const ENTRY_COPY: Record<EntryPath, { label: string; recommends: Plan['id'] }> =
 interface PricingPageProps {
   activeCreators?: number | string;
   thumbnailsGenerated?: number | string;
-  /** Dev-only: when provided, shows a button that unlocks the blurred teaser
-   *  thumbnail from the free/dev-bypass generation without a real purchase. */
-  onSimulateUnlock?: () => void;
   /** Renders as an in-page `<section id="pricing">` instead of a standalone
    *  `<main>` — used when embedded inline on LandingPage instead of routed
    *  to directly, so it scrolls as part of that page rather than owning its
@@ -218,7 +215,6 @@ function AnimatedStatValue({
 export default function PricingPage({
   activeCreators,
   thumbnailsGenerated,
-  onSimulateUnlock,
   embedded = false,
 }: PricingPageProps) {
   const navigate = useNavigate();
@@ -511,19 +507,6 @@ export default function PricingPage({
         {/* FAQ — omitted when embedded on LandingPage, which renders its own
             PricingFaq lower on the page (after the Features section). */}
         {!embedded && <PricingFaq />}
-
-        {onSimulateUnlock && (
-          <button
-            type="button"
-            onClick={() => {
-              onSimulateUnlock();
-              navigate('/');
-            }}
-            className="self-center text-sm font-medium text-on-surface-variant hover:text-blue-500 underline underline-offset-4 transition-colors"
-          >
-            Simulate unlock (dev only)
-          </button>
-        )}
       </div>
     </Wrapper>
   );
