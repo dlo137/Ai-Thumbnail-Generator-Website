@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { CreditsProvider, useCredits } from './contexts/CreditsContext';
 import { GenerationHistoryProvider, useGenerationHistory } from './contexts/GenerationHistoryContext';
@@ -359,6 +360,7 @@ export default function App() {
           </ToastProvider>
         </CreditsProvider>
       </AuthProvider>
+      <Analytics />
     </BrowserRouter>
   );
 }
